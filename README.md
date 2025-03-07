@@ -23,14 +23,14 @@
 
 ### 1. Clone the Repository
 
-```bash
 git clone https://github.com/htroche/Asibot.git
 cd Asibot
-2. Set Up Environment Variables
+
+### 2. Set Up Environment Variables
+
 Create a .env file in the project root with these variables:
 
-env
-Copy
+
 JIRA_BASE_URL=https://your-jira-instance.atlassian.net
 JIRA_EMAIL=your-email@example.com
 JIRA_API_TOKEN=your-jira-api-token
@@ -42,21 +42,21 @@ PYTHONUNBUFFERED=1  # For Cloud Run logging
 Jira API Token: Generate at id.atlassian.com.
 OpenAI API Key: From platform.openai.com.
 Slack Secrets: See Slack Setup below.
-3. Install Dependencies
-bash
-Copy
+
+### 3. Install Dependencies
+
 pip install -r requirements.txt
 Contents of requirements.txt:
 
-txt
-Copy
+
 flask==2.3.2
 requests==2.31.0
 slack-sdk==3.27.1
 openai==1.10.0
 python-dotenv==1.0.0
-4. Slack Setup
-Create a Slack App
+
+### 4. Slack Setup
+**Create a Slack App**
 Go to api.slack.com/apps and click Create New App > From scratch.
 Name: "Asibot", Workspace: Your workspace.
 Bot User
@@ -76,15 +76,14 @@ Subscribe to Bot Events: message.im
 Get Secrets
 OAuth & Permissions: Copy the Bot User OAuth Token (xoxb-...) to SLACK_BOT_TOKEN.
 Basic Information: Copy the Signing Secret to SLACK_SIGNING_SECRET.
-5. Run Locally
-bash
-Copy
+
+### 5. Run Locally
+
 python app.py
 Default port: 5000. Set FLASK_DEBUG=true for debug mode locally.
 
-6. Deploy to Production (Cloud Run)
+### 6. Deploy to Production (Cloud Run)
 Dockerfile
-dockerfile
 Copy
 FROM python:3.9-slim
 WORKDIR /app
@@ -92,9 +91,9 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 CMD ["python", "app.py"]
-Build and Deploy
-bash
-Copy
+
+### Build and Deploy
+
 docker build --platform linux/amd64 -t asibot .
 docker tag asibot gcr.io/your-project-id/asibot
 docker push gcr.io/your-project-id/asibot
@@ -106,8 +105,8 @@ gcloud run deploy asibot \
   --set-env-vars "JIRA_BASE_URL=https://your-jira-instance.atlassian.net,JIRA_EMAIL=your-email@example.com,JIRA_API_TOKEN=your-api-token,OPENAI_API_KEY=your-openai-key,STORY_POINTS_FIELD=customfield_10016,SERVICE_BASE_URL=https://your-app-url.com,PYTHONUNBUFFERED=1,SLACK_SIGNING_SECRET=your-signing-secret,SLACK_BOT_TOKEN=xoxb-your-bot-token"
 Replace your-project-id and your-app-url.com with your GCP project ID and deployed URL.
 
-Usage
-Direct Messages
+### Usage
+**Direct Messages**
 Example 1:
 DM @Asibot: "metrics for XYZ last 3 sprints"
 Returns sprint metrics for project XYZ.
@@ -123,9 +122,7 @@ Lists stories with status changes in the specified period.
 Response Format
 Responses are returned as a single Slack Block with clickable Jira links (e.g., <https://your-jira-instance.atlassian.net/browse/XYZ-123>).
 
-Project Structure
-bash
-Copy
+### Project Structure
 Asibot/
 ├── app.py              # Flask app with Slack event endpoint
 ├── openai_manager.py   # OpenAI and Jira logic
@@ -133,7 +130,8 @@ Asibot/
 ├── Dockerfile          # Container definition
 ├── .env                # Environment variables (not tracked)
 └── README.md           # This file
-Configuration Details
+
+### Configuration Details
 Jira: Uses Parent Link and Epic Link for initiative-to-epic-to-issue hierarchy. Customize STORY_POINTS_FIELD if your Jira instance uses a different custom field.
 OpenAI: Requires a valid API key and model (default: o3-mini).
 Slack: Handles DMs via the Events API, with threading to avoid timeouts.
@@ -150,7 +148,7 @@ Check logs for slow OpenAI/Jira calls; threading should mitigate this (endpoint 
 Debug Mode:
 Don’t set FLASK_DEBUG in production (defaults to False).
 
-Contributing
+### Contributing
 Fork the Repo:
 git fork https://github.com/yourusername/Asibot.git
 
@@ -165,8 +163,9 @@ git push origin feature/your-feature and open a pull request.
 
 Issues: Report bugs or suggest features on GitHub Issues.
 Code Style: Follow PEP 8; use comments for clarity.
-License
+
+### License
 This project is licensed under the MIT License.
 
-Acknowledgments
-Built with love by Hugo Troche using Python.
+### Acknowledgments
+Built with love by **Hugo Troche** using Python.
