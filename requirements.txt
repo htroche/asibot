@@ -6,3 +6,4 @@ pytest
 openai
 slack_sdk
 python-dateutil
+litellm>=1.10.0

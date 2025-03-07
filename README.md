@@ -1,22 +1,22 @@
 # Asibot
 
-**Asibot** is an open-source Slack bot that integrates with Jira to provide project metrics and initiative summaries via direct messages (DMs). Built with **Flask**, **OpenAI**, and the **Slack SDK**, it allows users to query Jira data in real-time by sending natural language messages directly to the bot. Whether you want sprint metrics for a project or a summary of issues with status changes for an initiative, Asibot responds in your DMs with a clean, formatted reply.
+**Asibot** is an open-source Slack bot that integrates with Jira to provide project metrics and initiative summaries via direct messages (DMs). Built with **Flask**, **LiteLLM**, and the **Slack SDK**, it allows users to query Jira data in real-time by sending natural language messages directly to the bot. Whether you want sprint metrics for a project or a summary of issues with status changes for an initiative, Asibot responds in your DMs with a clean, formatted reply.
 
 ## Features
 
 - **Direct Messages:** DM the bot with queries like `"metrics for XYZ last 3 sprints"` or `"summary of all issues in blocked status for initiative PROG-123 in the last 2 weeks"`.
 - **Jira Integration:** Fetches project metrics and initiative issues, including status changes within a date range.
-- **Pagination:** Handles >100 issues/epics with Jira’s API.
+- **Pagination:** Handles >100 issues/epics with Jira's API.
 - **Slack Blocks:** Responses are formatted in a single Slack Block Kit section for clarity.
-- **OpenAI-Powered:** Uses OpenAI to interpret queries and format responses dynamically.
-- **Production-Ready:** Configurable debug mode and threading to handle Slack’s 3-second event timeout.
+- **LLM-Agnostic:** Supports multiple LLM providers (OpenAI, Anthropic Claude, etc.) to interpret queries and format responses dynamically.
+- **Production-Ready:** Configurable debug mode and threading to handle Slack's 3-second event timeout.
 
 ## Prerequisites
 
 - **Python:** 3.9+ (tested with 3.9-slim in Docker).
 - **Slack Workspace:** With admin access to create/install an app.
 - **Jira Instance:** With API token access (e.g., Atlassian Cloud).
-- **OpenAI Account:** With an API key.
+- **LLM Provider Account:** With an API key (OpenAI, Anthropic, etc.).
 - **Google Cloud Platform (GCP):** Optional, for Cloud Run deployment (or any hosting service).
 
 ## Installation
@@ -34,13 +34,21 @@ Create a .env file in the project root with these variables:
 JIRA_BASE_URL=https://your-jira-instance.atlassian.net
 JIRA_EMAIL=your-email@example.com
 JIRA_API_TOKEN=your-jira-api-token
-OPENAI_API_KEY=your-openai-api-key
 STORY_POINTS_FIELD=customfield_10025  # Your Jira story points field ID
 SLACK_SIGNING_SECRET=your-slack-signing-secret
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
 PYTHONUNBUFFERED=1  # For Cloud Run logging
+
+# LLM Configuration
+LLM_PROVIDER=openai  # or anthropic, etc.
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=o3-mini
+# ANTHROPIC_API_KEY=your-anthropic-key
+# ANTHROPIC_MODEL=claude-3-opus-20240229
+# LLM_FALLBACKS=anthropic/claude-3-haiku-20240307,openai/gpt-3.5-turbo
+
 Jira API Token: Generate at id.atlassian.com.
-OpenAI API Key: From platform.openai.com.
+LLM API Keys: From respective provider platforms (platform.openai.com, console.anthropic.com, etc.).
 Slack Secrets: See Slack Setup below.
 
 ### 3. Install Dependencies
@@ -54,6 +62,7 @@ requests==2.31.0
 slack-sdk==3.27.1
 openai==1.10.0
 python-dotenv==1.0.0
+litellm>=1.10.0
 
 ### 4. Slack Setup
 **Create a Slack App**
@@ -102,7 +111,7 @@ gcloud run deploy asibot \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars "JIRA_BASE_URL=https://your-jira-instance.atlassian.net,JIRA_EMAIL=your-email@example.com,JIRA_API_TOKEN=your-api-token,OPENAI_API_KEY=your-openai-key,STORY_POINTS_FIELD=customfield_10016,SERVICE_BASE_URL=https://your-app-url.com,PYTHONUNBUFFERED=1,SLACK_SIGNING_SECRET=your-signing-secret,SLACK_BOT_TOKEN=xoxb-your-bot-token"
+  --set-env-vars "JIRA_BASE_URL=https://your-jira-instance.atlassian.net,JIRA_EMAIL=your-email@example.com,JIRA_API_TOKEN=your-api-token,LLM_PROVIDER=openai,OPENAI_API_KEY=your-openai-key,OPENAI_MODEL=o3-mini,STORY_POINTS_FIELD=customfield_10016,SERVICE_BASE_URL=https://your-app-url.com,PYTHONUNBUFFERED=1,SLACK_SIGNING_SECRET=your-signing-secret,SLACK_BOT_TOKEN=xoxb-your-bot-token"
 Replace your-project-id and your-app-url.com with your GCP project ID and deployed URL.
 
 ### Usage
@@ -125,7 +134,8 @@ Responses are returned as a single Slack Block with clickable Jira links (e.g., 
 ### Project Structure
 Asibot/
 ├── app.py              # Flask app with Slack event endpoint
-├── openai_manager.py   # OpenAI and Jira logic
+├── llm_manager.py      # LLM abstraction layer for multiple providers
+├── metrics_manager.py  # Jira metrics logic
 ├── requirements.txt    # Python dependencies
 ├── Dockerfile          # Container definition
 ├── .env                # Environment variables (not tracked)
@@ -133,8 +143,14 @@ Asibot/
 
 ### Configuration Details
 Jira: Uses Parent Link and Epic Link for initiative-to-epic-to-issue hierarchy. Customize STORY_POINTS_FIELD if your Jira instance uses a different custom field.
-OpenAI: Requires a valid API key and model (default: o3-mini).
+
+LLM Providers: The application supports multiple LLM providers through LiteLLM:
+- OpenAI (default): Set `LLM_PROVIDER=openai` and configure `OPENAI_API_KEY` and `OPENAI_MODEL`
+- Anthropic Claude: Set `LLM_PROVIDER=anthropic` and configure `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL`
+- Fallbacks: Configure `LLM_FALLBACKS` with comma-separated list of models to try if the primary model fails
+
 Slack: Handles DMs via the Events API, with threading to avoid timeouts.
+
 Troubleshooting
 "Sending messages to this app has been turned off":
 Ensure the bot user is added, scopes are set (im:read, im:write, chat:write), and the app is reinstalled.
@@ -143,14 +159,14 @@ Infinite Loop in DMs:
 Verify that the bot_user_id filter is working (logs should show "Ignoring message from bot").
 
 Timeout Errors:
-Check logs for slow OpenAI/Jira calls; threading should mitigate this (endpoint returns within 3 seconds).
+Check logs for slow LLM/Jira calls; threading should mitigate this (endpoint returns within 3 seconds).
 
 Debug Mode:
-Don’t set FLASK_DEBUG in production (defaults to False).
+Don't set FLASK_DEBUG in production (defaults to False).
 
 ### Contributing
 Fork the Repo:
-git fork https://github.com/yourusername/Asibot.git
+git fork https://github.com/htroche/Asibot.git
 
 Create a Branch:
 git checkout -b feature/your-feature

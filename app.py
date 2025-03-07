@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from dateutil import parser as date_parser 
 from flask import Flask, jsonify, request
 from requests.auth import HTTPBasicAuth
-from openai_manager import *
+from llm_manager import LLMManager
 from slack_sdk.signature import SignatureVerifier
 from slack_sdk import WebClient
 signing_secret = os.environ.get("SLACK_SIGNING_SECRET")
@@ -24,7 +24,7 @@ DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() in ("true", "1", "t")
 
 app = Flask(__name__)
 
-openai_manager = OpenAIManager()
+llm_manager = LLMManager()
 
 
 @app.route("/assistant", methods=["POST"])
@@ -34,7 +34,7 @@ def assistant_endpoint():
     data = request.get_json()
     user_message = data.get("message", "")
     conversation = data.get("conversation", [])
-    response_text = openai_manager.process_message(user_message, conversation)
+    response_text = llm_manager.process_message(user_message, conversation)
     return jsonify({"response": response_text})
 
 @app.route("/slack/events", methods=["POST"])
@@ -64,7 +64,7 @@ def slack_events():
         # Process and respond in a separate thread
         def process_dm():
             try:
-                response_text = openai_manager.process_message(text)
+                response_text = llm_manager.process_message(text)
                 client.chat_postMessage(
                     channel=channel,
                     blocks=[{"type": "section", "text": {"type": "mrkdwn", "text": response_text}}]
