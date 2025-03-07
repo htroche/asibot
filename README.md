@@ -32,19 +32,30 @@ Create a .env file in the project root with these variables:
 
 
 JIRA_BASE_URL=https://your-jira-instance.atlassian.net
+
 JIRA_EMAIL=your-email@example.com
+
 JIRA_API_TOKEN=your-jira-api-token
+
 STORY_POINTS_FIELD=customfield_10025  # Your Jira story points field ID
+
 SLACK_SIGNING_SECRET=your-slack-signing-secret
+
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
+
 PYTHONUNBUFFERED=1  # For Cloud Run logging
 
 ### LLM Configuration
 LLM_PROVIDER=openai  # or anthropic, etc.
+
 OPENAI_API_KEY=your-openai-api-key
+
 OPENAI_MODEL=o3-mini
+
 ANTHROPIC_API_KEY=your-anthropic-key
+
 ANTHROPIC_MODEL=claude-3-opus-20240229
+
 LLM_FALLBACKS=anthropic/claude-3-haiku-20240307,openai/gpt-3.5-turbo
 
 Jira API Token: Generate at id.atlassian.com.
