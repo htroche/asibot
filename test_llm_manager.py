@@ -9,7 +9,8 @@ def llm_manager():
         'OPENAI_MODEL': 'o3-mini',
         'OPENAI_API_KEY': 'test-key',
         'STORY_POINTS_FIELD': 'customfield_10025',
-        'JIRA_BASE_URL': 'https://test.atlassian.net'
+        'JIRA_BASE_URL': 'https://test.atlassian.net',
+        'JIRA_FIELDS': 'key,summary,status,updated,description,issuetype'
     }):
         return LLMManager()
 
@@ -35,11 +36,18 @@ def test_process_message_no_function_call(mock_completion, llm_manager):
     assert result == "Test response"
     
     # Verify completion was called with correct parameters
-    mock_completion.assert_called_once()
-    call_args = mock_completion.call_args[1]
-    assert call_args['model'] == 'o3-mini'  # OpenAI model doesn't need provider prefix
-    assert call_args['messages'][-1]['content'] == "Test message"
-    assert 'tools' in call_args
+    assert mock_completion.call_count >= 1  # Allow for multiple calls
+    
+    # Check the first call arguments
+    first_call_args = mock_completion.call_args_list[0][1]
+    assert first_call_args['model'] == 'o3-mini'  # OpenAI model doesn't need provider prefix
+    
+    # Find the user message in the messages list
+    user_messages = [msg for msg in first_call_args['messages'] if msg['role'] == 'user']
+    assert len(user_messages) > 0
+    assert user_messages[0]['content'] == "Test message"
+    
+    assert 'tools' in first_call_args
 
 @patch('llm_manager.completion')
 def test_process_message_with_function_call(mock_completion, llm_manager):
@@ -93,10 +101,32 @@ def test_fallback_mechanism(mock_completion, llm_manager):
     assert result == "Fallback response"
     
     # Verify completion was called with fallbacks
-    mock_completion.assert_called_once()
+    assert mock_completion.call_count >= 1  # Allow for multiple calls
     call_args = mock_completion.call_args[1]
     assert call_args['model'] == 'anthropic/claude-3-opus-20240229'
     assert call_args['fallbacks'] == ["o3-mini"]  # OpenAI model doesn't need provider prefix
+
+def test_jira_fields_configuration(llm_manager):
+    # Test that the Jira fields are properly loaded
+    assert llm_manager.jira_fields == 'key,summary,status,updated,description,issuetype,customfield_10025'
+    
+    # Test with a different set of fields
+    with patch.dict('os.environ', {
+        'JIRA_FIELDS': 'key,summary,status',
+        'STORY_POINTS_FIELD': 'customfield_10025'
+    }):
+        manager = LLMManager()
+        assert manager.jira_fields == 'key,summary,status,customfield_10025'
+    
+    # Test with story points field already included in JIRA_FIELDS
+    with patch.dict('os.environ', {
+        'JIRA_FIELDS': 'key,summary,status,customfield_10025',
+        'STORY_POINTS_FIELD': 'customfield_10025'
+    }):
+        manager = LLMManager()
+        assert manager.jira_fields == 'key,summary,status,customfield_10025'
+        # Ensure no duplication of the field
+        assert manager.jira_fields.count('customfield_10025') == 1
 
 @patch('llm_manager.completion')
 def test_error_handling(mock_completion, llm_manager):

@@ -37,6 +37,14 @@ class LLMManager:
         self.story_points_field = os.environ.get("STORY_POINTS_FIELD", "customfield_10025")
         self.jira_base_url = os.environ.get("JIRA_BASE_URL", "https://api.atlassian.net").strip()
         
+        # Load Jira fields configuration
+        default_fields = "key,summary,status,updated,description,issuetype"
+        self.jira_fields = os.environ.get("JIRA_FIELDS", default_fields).strip()
+        
+        # Ensure story points field is included for backward compatibility
+        if self.story_points_field not in self.jira_fields.split(','):
+            self.jira_fields += f",{self.story_points_field}"
+        
         # Define functions (same as in your current implementation)
         self.functions = [
             {
@@ -337,7 +345,7 @@ class LLMManager:
 
         jql_issues = f'"Epic Link" in ({",".join(epic_keys)}) AND updated >= "{start_date}" AND updated <= "{end_date}"'
         params["jql"] = jql_issues
-        params["fields"] = f"key,summary,status,updated,description,issuetype,{os.environ.get('STORY_POINTS_FIELD', 'customfield_10025').strip()}"
+        params["fields"] = self.jira_fields
         params["startAt"] = 0
 
         updated_issues = []

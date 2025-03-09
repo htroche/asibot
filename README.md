@@ -39,6 +39,8 @@ JIRA_API_TOKEN=your-jira-api-token
 
 STORY_POINTS_FIELD=customfield_10025  # Your Jira story points field ID
 
+JIRA_FIELDS=key,summary,status,updated,description,issuetype,customfield_10025  # Comma-separated list of Jira fields to fetch
+
 SLACK_SIGNING_SECRET=your-slack-signing-secret
 
 SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
@@ -122,7 +124,7 @@ gcloud run deploy asibot \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars "JIRA_BASE_URL=https://your-jira-instance.atlassian.net,JIRA_EMAIL=your-email@example.com,JIRA_API_TOKEN=your-api-token,LLM_PROVIDER=openai,OPENAI_API_KEY=your-openai-key,OPENAI_MODEL=o3-mini,STORY_POINTS_FIELD=customfield_10016,SERVICE_BASE_URL=https://your-app-url.com,PYTHONUNBUFFERED=1,SLACK_SIGNING_SECRET=your-signing-secret,SLACK_BOT_TOKEN=xoxb-your-bot-token"
+  --set-env-vars "JIRA_BASE_URL=https://your-jira-instance.atlassian.net,JIRA_EMAIL=your-email@example.com,JIRA_API_TOKEN=your-api-token,LLM_PROVIDER=openai,OPENAI_API_KEY=your-openai-key,OPENAI_MODEL=o3-mini,STORY_POINTS_FIELD=customfield_10016,JIRA_FIELDS=key,summary,status,updated,description,issuetype,SERVICE_BASE_URL=https://your-app-url.com,PYTHONUNBUFFERED=1,SLACK_SIGNING_SECRET=your-signing-secret,SLACK_BOT_TOKEN=xoxb-your-bot-token"
 Replace your-project-id and your-app-url.com with your GCP project ID and deployed URL.
 
 ### Usage
@@ -153,7 +155,10 @@ Asibot/
 └── README.md           # This file
 
 ### Configuration Details
-Jira: Uses Parent Link and Epic Link for initiative-to-epic-to-issue hierarchy. Customize STORY_POINTS_FIELD if your Jira instance uses a different custom field.
+Jira: Uses Parent Link and Epic Link for initiative-to-epic-to-issue hierarchy. 
+
+- **STORY_POINTS_FIELD**: Customize if your Jira instance uses a different custom field for story points.
+- **JIRA_FIELDS**: Configure which fields to fetch from Jira. This is a comma-separated list of field names (e.g., `key,summary,status,updated,description,issuetype`). The story points field will be automatically included if not already in the list.
 
 LLM Providers: The application supports multiple LLM providers through LiteLLM:
 - OpenAI (default): Set `LLM_PROVIDER=openai` and configure `OPENAI_API_KEY` and `OPENAI_MODEL`
