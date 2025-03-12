@@ -1,8 +1,9 @@
 
 import os
+import concurrent.futures
 from requests.auth import HTTPBasicAuth
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dateutil import parser as date_parser 
 
 from dotenv import load_dotenv
@@ -139,21 +140,77 @@ def get_jira_issues_for_sprint(sprint_id, board_id):
     return issues, 200, "OK"
 
 
-
-def calculate_metrics_for_sprint(issues):
+def get_issue_changelog_batch(issue_keys, max_workers=10):
     """
-    Calculate metrics for a sprint using the baseline date (sprint start + 2 days).
+    Fetch changelogs for multiple issues in parallel.
     
-    - Committed story points are summed only for issues that were in the sprint as of the baseline date.
-    - Completed points are summed from those committed issues that are in a "done" status.
+    Args:
+        issue_keys: List of issue keys to fetch changelogs for
+        max_workers: Maximum number of parallel requests
+        
+    Returns:
+        Dictionary mapping issue keys to their changelogs
+    """
+    changelogs = {}
+    
+    def fetch_single_changelog(issue_key):
+        url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/changelog"
+        headers = {"Accept": "application/json"}
+        try:
+            response = requests.get(
+                url, 
+                auth=HTTPBasicAuth(JIRA_EMAIL, JIRA_API_TOKEN),
+                headers=headers
+            )
+            if response.status_code == 200:
+                return issue_key, response.json()
+            else:
+                print(f"Error fetching changelog for {issue_key}: {response.status_code}", flush=True)
+                return issue_key, None
+        except Exception as e:
+            print(f"Exception fetching changelog for {issue_key}: {str(e)}", flush=True)
+            return issue_key, None
+    
+    # Use ThreadPoolExecutor to fetch changelogs in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all requests
+        future_to_key = {
+            executor.submit(fetch_single_changelog, key): key 
+            for key in issue_keys
+        }
+        
+        # Process results as they complete
+        for future in concurrent.futures.as_completed(future_to_key):
+            key, changelog = future.result()
+            if changelog:
+                changelogs[key] = changelog
+    
+    return changelogs
+
+
+
+def calculate_metrics_for_sprint(issues, sprint_start_date, sprint_end_date, batch_size=20, max_workers=10):
+    """
+    Calculate metrics for a sprint, counting only issues that were completed during the sprint.
+    Uses batch processing and parallel requests for changelog fetching.
+    
+    Args:
+        issues: List of issues in the sprint
+        sprint_start_date: Start date of the sprint
+        sprint_end_date: End date of the sprint
+        batch_size: Number of issues to process in each batch
+        max_workers: Maximum number of parallel requests
     """
     total_committed_issues = 0
     committed_points = 0.0
     completed_points = 0.0
     completed_issues = 0
-
+    
+    # First pass: Count all committed issues and identify potentially completed ones
+    potentially_done_issues = []
+    
     for issue in issues:
-
+        issue_key = issue.get("key")
         total_committed_issues += 1
         fields = issue.get("fields", {})
         story_points = fields.get(STORY_POINTS_FIELD) or 0
@@ -161,19 +218,79 @@ def calculate_metrics_for_sprint(issues):
             story_points = float(story_points)
         except (ValueError, TypeError):
             story_points = 0
-
+            
         committed_points += story_points
-
+        
+        # Check if issue is currently done - if so, we need to verify when it was completed
         status = fields.get("status", {})
         status_category = status.get("statusCategory", {})
         if status_category.get("key", "").lower() == "done":
-            completed_points += story_points
-            completed_issues += 1
-
+            potentially_done_issues.append({
+                "key": issue_key,
+                "story_points": story_points,
+                "issue": issue
+            })
+    
+    print(f"Found {len(potentially_done_issues)} potentially completed issues out of {total_committed_issues} total issues", flush=True)
+    
+    # Process potentially done issues in batches
+    for i in range(0, len(potentially_done_issues), batch_size):
+        batch = potentially_done_issues[i:i+batch_size]
+        batch_keys = [issue["key"] for issue in batch]
+        
+        print(f"Processing batch {i//batch_size + 1} with {len(batch)} issues", flush=True)
+        
+        # Fetch changelogs for this batch in parallel
+        changelogs_batch = get_issue_changelog_batch(batch_keys, max_workers)
+        
+        # Process each issue in the batch
+        for issue_data in batch:
+            issue_key = issue_data["key"]
+            story_points = issue_data["story_points"]
+            
+            changelog = changelogs_batch.get(issue_key)
+            if changelog:
+                # Check if issue was completed during this sprint
+                completed_in_sprint = False
+                
+                for history in changelog.get("values", []):
+                    created_str = history.get("created")
+                    if not created_str:
+                        continue
+                        
+                    try:
+                        created = date_parser.isoparse(created_str)
+                        
+                        # Check if this change happened during the sprint
+                        if sprint_start_date <= created <= sprint_end_date:
+                            for item in history.get("items", []):
+                                if item.get("field") == "status":
+                                    to_status = item.get("toString", "")
+                                    to_status_lower = to_status.lower()
+                                    
+                                    # Check if this transition was to a "Done" status
+                                    # Adjust these keywords based on your Jira workflow
+                                    done_keywords = ["done", "closed", "complete", "resolved", "finished"]
+                                    if any(keyword in to_status_lower for keyword in done_keywords):
+                                        completed_in_sprint = True
+                                        break
+                            
+                            if completed_in_sprint:
+                                break
+                    except Exception as e:
+                        print(f"Error parsing changelog date for {issue_key}: {str(e)}", flush=True)
+                
+                if completed_in_sprint:
+                    completed_points += story_points
+                    completed_issues += 1
+                    print(f"Issue {issue_key} was completed during the sprint", flush=True)
+                else:
+                    print(f"Issue {issue_key} is done now but was NOT completed during the sprint", flush=True)
+    
     velocity = completed_points
     churn = committed_points - completed_points
     churn_rate = (churn / committed_points * 100) if committed_points > 0 else 0
-
+    
     return {
         "total_committed_issues": total_committed_issues,
         "committed_points": committed_points,
@@ -247,6 +364,21 @@ def get_metrics(project_key, num_sprints=5):
         else:
             baseline_date = None
 
+        # Parse sprint end date
+        sprint_end_str = sprint.get("endDate")
+        sprint_end_date = None
+        if sprint_end_str:
+            try:
+                sprint_end_date = date_parser.isoparse(sprint_end_str)
+            except Exception as e:
+                print(f"Error parsing sprint end date: {e}", flush=True)
+                sprint_end_date = None
+        
+        # For active sprints, use current time as end date
+        if not sprint_end_date:
+            sprint_end_date = datetime.now(timezone.utc)
+            print(f"Using current time as end date for active sprint", flush=True)
+        
         issues, code, msg = get_jira_issues_for_sprint(sprint_id, board_id)
         if code != 200:
             sprint_results.append({
@@ -256,7 +388,17 @@ def get_metrics(project_key, num_sprints=5):
             })
             continue
         
-        metrics = calculate_metrics_for_sprint(issues)
+        print(f"Processing sprint: {sprint.get('name')}", flush=True)
+        print(f"Sprint dates: {sprint_start_date} to {sprint_end_date}", flush=True)
+        
+        # Use the updated function with batch processing and parallel requests
+        metrics = calculate_metrics_for_sprint(
+            issues, 
+            sprint_start_date, 
+            sprint_end_date,
+            batch_size=20,
+            max_workers=10
+        )
 
         sprint_info = {
             "sprint_id": sprint_id,
