@@ -43,26 +43,9 @@ def assistant_endpoint():
     user_message = data.get("message", "")
     conversation = data.get("conversation", [])
     
-    # Check if this is a complex analytics query that requires the agent-based architecture
-    is_complex_query = True
-    
-    # Pattern 1: Sprint metrics table
-    if "Show me" in user_message and ("velocity" in user_message or "points" in user_message or "churn" in user_message) and "table" in user_message:
-        is_complex_query = True
-    
-    # Pattern 2: Story point completion time analysis
-    if "how long" in user_message.lower() and "story points" in user_message.lower() and "finished" in user_message.lower():
-        is_complex_query = True
-    
-    # Pattern 3: Calendar days for story points
-    if "calendar days" in user_message.lower() and "story points" in user_message.lower():
-        is_complex_query = True
-    
-    if is_complex_query:
-        print(f"Detected complex analytics query in /assistant endpoint, using agent-based architecture", flush=True)
-        response_text = llm_manager.analyze_jira_data(user_message)
-    else:
-        response_text = llm_manager.process_message(user_message, conversation)
+    # Use the agent-based architecture for all queries
+    print(f"Processing query through agent-based architecture", flush=True)
+    response_text = llm_manager.analyze_jira_data(user_message)
     
     return jsonify({"response": response_text})
 
@@ -179,26 +162,9 @@ def slack_events():
                 # 4. Process the actual message
                 print(f"[{message_thread_id}] Calling LLM manager to process message", flush=True)
                 
-                # Check if this is a complex analytics query that requires the agent-based architecture
-                is_complex_query = False
-                
-                # Pattern 1: Sprint metrics table
-                if "Show me" in text and ("velocity" in text or "points" in text or "churn" in text) and "table" in text:
-                    is_complex_query = True
-                
-                # Pattern 2: Story point completion time analysis
-                if "how long" in text.lower() and "story points" in text.lower() and "finished" in text.lower():
-                    is_complex_query = True
-                
-                # Pattern 3: Calendar days for story points
-                if "calendar days" in text.lower() and "story points" in text.lower():
-                    is_complex_query = True
-                
-                if is_complex_query:
-                    print(f"[{message_thread_id}] Detected complex analytics query, using agent-based architecture", flush=True)
-                    response_text = llm_manager.analyze_jira_data(text)
-                else:
-                    response_text = llm_manager.process_message(text)
+                # Use the agent-based architecture for all queries
+                print(f"[{message_thread_id}] Processing query through agent-based architecture", flush=True)
+                response_text = llm_manager.analyze_jira_data(text)
                 
                 print(f"[{message_thread_id}] Received response from LLM manager (length: {len(response_text)})", flush=True)
                 

@@ -206,15 +206,15 @@ class LLMManager:
     
     def analyze_jira_data(self, query: str) -> str:
         """
-        Analyze Jira data with complex queries using the agent-based architecture.
+        Process all queries using the agent-based architecture.
         
         Args:
-            query: The analytics query in natural language
+            query: The query in natural language
             
         Returns:
             The analysis results as a string
         """
-        print(f"Processing complex analytics query: {query}", flush=True)
+        print(f"Processing query through agent-based architecture: {query}", flush=True)
         
         # Store the original provider to restore it later
         original_provider = self.provider
@@ -222,68 +222,18 @@ class LLMManager:
         try:
             # If using Anthropic, use the direct API method to avoid LiteLLM formatting issues
             if self.provider == "anthropic":
-                print(f"Using direct Anthropic API for complex analytics query", flush=True)
-                # For complex analytics queries, we'll use a simplified prompt
+                print(f"Using direct Anthropic API for query", flush=True)
+                # For queries, we'll use a simplified prompt
                 analytics_prompt = (
-                    f"Analyze the following Jira analytics query and provide a detailed response:\n\n"
+                    f"Answer the following Jira query and provide a detailed response:\n\n"
                     f"Query: {query}\n\n"
                     f"The current date is {datetime.now(timezone.utc).strftime('%Y-%m-%d')}.\n"
-                    f"For project PCTRS, analyze how long it takes in calendar days for stories with different story point values to be finished."
                 )
                 return self.process_message_with_anthropic_direct(analytics_prompt)
             
-            # Check if the query is about sprint metrics
-            if "sprint" in query.lower() and any(keyword in query.lower() for keyword in ["velocity", "points", "churn"]):
-                # Extract project key from the query
-                project_key_match = re.search(r'for\s+([A-Z]+)', query)
-                project_key = project_key_match.group(1) if project_key_match else None
-                
-                if not project_key:
-                    return "I couldn't identify the project key in your query. Please specify a project key (e.g., 'PCTRS')."
-                
-                # Extract number of sprints from the query
-                num_sprints_match = re.search(r'last\s+(\d+)\s+sprint', query, re.IGNORECASE)
-                num_sprints = int(num_sprints_match.group(1)) if num_sprints_match else 5
-                
-                # Get metrics for the project
-                from metrics_manager import get_metrics
-                metrics = get_metrics(project_key, num_sprints)
-                
-                # Format the response
-                if not metrics or not metrics.get("sprints"):
-                    return f"No sprint data found for project {project_key}."
-                
-                sprints = metrics.get("sprints", [])
-                
-                # Calculate average velocity
-                completed_points = [sprint.get("completed_points", 0) for sprint in sprints]
-                avg_velocity = sum(completed_points) / len(completed_points) if completed_points else 0
-                
-                # Build the table
-                table = f"Below is the summary for the last {num_sprints} sprints for {project_key}:\n"
-                table += f"• Average Velocity across sprints: {avg_velocity:.2f}\n\n"
-                table += "Sprint Metrics Details:\n"
-                table += "-----------------------------------------------------------\n"
-                table += "Sprint Name                       | Committed Points | Completed Points | Velocity | Churn\n"
-                table += "-----------------------------------------------------------\n"
-                
-                for sprint in sprints:
-                    name = sprint.get("name", "Unknown")
-                    committed = sprint.get("committed_points", 0)
-                    completed = sprint.get("completed_points", 0)
-                    velocity = completed  # Velocity is the same as completed points
-                    churn = committed - completed
-                    
-                    table += f"{name:<35} | {committed:<16.1f} | {completed:<16.1f} | {velocity:<8.1f} | {churn:<5.1f}  \n"
-                
-                table += "-----------------------------------------------------------\n"
-                table += "Let me know if you need any further details or analysis!"
-                
-                return table
-            else:
-                # Use the agent-based architecture for more complex queries
-                result = self.agent_coordinator.process_query(query)
-                return result
+            # Use the agent-based architecture for all queries
+            result = self.agent_coordinator.process_query(query)
+            return result
         except Exception as e:
             print(f"Error in analyze_jira_data: {str(e)}", flush=True)
             return f"I encountered an error while analyzing the data: {str(e)}"
