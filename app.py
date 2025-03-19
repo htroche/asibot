@@ -7,7 +7,7 @@ import time
 from io import StringIO
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from requests.auth import HTTPBasicAuth
 from llm_manager import LLMManager
 from slack_sdk.signature import SignatureVerifier
@@ -30,9 +30,27 @@ message_cache_lock = Lock()
 
 DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() in ("true", "1", "t") 
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 
 llm_manager = LLMManager()
+
+@app.route("/", methods=["GET"])
+def index():
+    if not DEBUG:
+        return 'Not found', 404
+    """
+    Serve the chat interface HTML page.
+    """
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route("/<path:filename>")
+def static_files(filename):
+    if not DEBUG:
+        return 'Not found', 404
+    """
+    Serve static files (CSS, JS, etc.)
+    """
+    return send_from_directory(app.static_folder, filename)
 
 
 @app.route("/assistant", methods=["POST"])
@@ -42,8 +60,98 @@ def assistant_endpoint():
     data = request.get_json()
     user_message = data.get("message", "")
     conversation = data.get("conversation", [])
-    response_text = llm_manager.process_message(user_message, conversation)
-    return jsonify({"response": response_text})
+    
+    # Use the agent-based architecture for all queries
+    print(f"Processing query through agent-based architecture", flush=True)
+    response_text = llm_manager.analyze_jira_data(user_message, conversation)
+    
+    # Update conversation history
+    updated_conversation = conversation + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": response_text}
+    ]
+    
+    return jsonify({
+        "response": response_text,
+        "conversation": updated_conversation
+    })
+
+@app.route("/analytics", methods=["POST"])
+def analytics_endpoint():
+    """
+    Endpoint for complex analytics queries that require the agent-based architecture.
+    """
+    if not DEBUG:
+        return 'Not found', 404
+    data = request.get_json()
+    query = data.get("query", "")
+    conversation = data.get("conversation", [])
+    result = llm_manager.analyze_jira_data(query, conversation)
+    
+    # Update conversation history
+    updated_conversation = conversation + [
+        {"role": "user", "content": query},
+        {"role": "assistant", "content": result}
+    ]
+    
+    return jsonify({
+        "result": result,
+        "conversation": updated_conversation
+    })
+
+def get_conversation_history(channel_id, limit=5):
+    """
+    Retrieve recent conversation history from Slack.
+    
+    Args:
+        channel_id: The Slack channel ID
+        limit: Maximum number of messages to retrieve
+        
+    Returns:
+        List of messages in the conversation format expected by the LLM
+    """
+    try:
+        # Call the Slack API to get conversation history
+        result = client.conversations_history(
+            channel=channel_id,
+            limit=limit * 2  # Get more messages than needed to account for bot messages
+        )
+        
+        # Messages are returned in reverse chronological order (newest first)
+        # So we need to reverse them to get chronological order
+        messages = list(reversed(result["messages"]))
+        
+        # Get our own bot ID
+        bot_info = client.auth_test()
+        our_bot_id = bot_info["bot_id"]
+        
+        # Convert to the format expected by our LLM
+        conversation = []
+        for msg in messages:
+            # Skip bot messages from other bots
+            if msg.get("bot_id") and msg.get("bot_id") != our_bot_id:
+                continue
+                
+            # Determine the role (user or assistant)
+            if msg.get("bot_id") == our_bot_id:
+                role = "assistant"
+            else:
+                role = "user"
+                
+            # Extract the text content
+            content = msg.get("text", "")
+            
+            # Add to conversation
+            conversation.append({
+                "role": role,
+                "content": content
+            })
+            
+        # Limit to the requested number of messages
+        return conversation[-limit:] if len(conversation) > limit else conversation
+    except Exception as e:
+        print(f"Error retrieving conversation history: {str(e)}", flush=True)
+        return []
 
 @app.route("/slack/events", methods=["POST"])
 def slack_events():
@@ -145,7 +253,16 @@ def slack_events():
                 
                 # 4. Process the actual message
                 print(f"[{message_thread_id}] Calling LLM manager to process message", flush=True)
-                response_text = llm_manager.process_message(text)
+                
+                # Retrieve conversation history from Slack
+                print(f"[{message_thread_id}] Retrieving conversation history", flush=True)
+                conversation = get_conversation_history(channel, limit=5)
+                print(f"[{message_thread_id}] Retrieved {len(conversation)} messages from conversation history", flush=True)
+                
+                # Use the agent-based architecture for all queries
+                print(f"[{message_thread_id}] Processing query through agent-based architecture", flush=True)
+                response_text = llm_manager.analyze_jira_data(text, conversation)
+                
                 print(f"[{message_thread_id}] Received response from LLM manager (length: {len(response_text)})", flush=True)
                 
                 # 5. Stop the typing indicator

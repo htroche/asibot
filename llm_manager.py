@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,14 @@ from urllib.parse import unquote
 from metrics_manager import get_metrics
 import litellm
 from litellm import completion
+import anthropic
 from typing import List, Dict, Any, Optional, Union
+
+# Import agent components
+from agent_coordinator import AgentCoordinator, QueryAnalysis
+from analytics_registry import AnalyticsRegistry
+from code_generator import CodeGenerator
+from deployment_manager import DeploymentManager
 
 load_dotenv()
 
@@ -45,6 +53,24 @@ class LLMManager:
         if self.story_points_field not in self.jira_fields.split(','):
             self.jira_fields += f",{self.story_points_field}"
         
+        # Initialize agent components
+        analytics_dir = os.environ.get("ANALYTICS_DIR", os.path.join(os.path.dirname(__file__), "analytics"))
+        registry_path = os.environ.get("REGISTRY_PATH", os.path.join(os.path.dirname(__file__), "data", "analytics_registry.json"))
+        
+        # Create directories if they don't exist
+        os.makedirs(analytics_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(registry_path), exist_ok=True)
+        
+        # Initialize components
+        self.analytics_registry = AnalyticsRegistry(db_path=registry_path)
+        self.code_generator = CodeGenerator(llm_manager=self)
+        self.deployment_manager = DeploymentManager(base_path=analytics_dir, registry=self.analytics_registry)
+        self.agent_coordinator = AgentCoordinator(
+            registry=self.analytics_registry,
+            code_generator=self.code_generator,
+            deployer=self.deployment_manager
+        )
+        
         # Define functions (same as in your current implementation)
         self.functions = [
             {
@@ -78,6 +104,22 @@ class LLMManager:
                         "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format (e.g., 2025-02-21), defaults to today if unspecified."}
                     },
                     "required": ["initiative_key"]
+                }
+            },
+            {
+                "name": "analyze_jira_data",
+                "description": (
+                    "Analyze Jira data with complex queries that may require custom processing. "
+                    "This function can answer questions about trends, patterns, and metrics "
+                    "across projects and time periods. It can handle queries that would normally "
+                    "exceed the context limits of the LLM."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The analytics query in natural language."}
+                    },
+                    "required": ["query"]
                 }
             }
         ]
@@ -162,11 +204,58 @@ class LLMManager:
         self.model = self.get_model_string()
         return True
     
+    def analyze_jira_data(self, query: str, conversation: list = None) -> str:
+        """
+        Process all queries using the agent-based architecture.
+        
+        Args:
+            query: The query in natural language
+            conversation: Optional conversation history
+            
+        Returns:
+            The analysis results as a string
+        """
+        print(f"Processing query through agent-based architecture: {query}", flush=True)
+        
+        # Store the original provider to restore it later
+        original_provider = self.provider
+        
+        try:
+            # If using Anthropic, use the direct API method to avoid LiteLLM formatting issues
+            if self.provider == "anthropic":
+                print(f"Using direct Anthropic API for query", flush=True)
+                # For queries, we'll use a simplified prompt
+                analytics_prompt = (
+                    f"Answer the following Jira query and provide a detailed response:\n\n"
+                    f"Query: {query}\n\n"
+                    f"The current date is {datetime.now(timezone.utc).strftime('%Y-%m-%d')}.\n"
+                )
+                return self.process_message_with_anthropic_direct(analytics_prompt, conversation)
+            
+            # Use the agent-based architecture for all queries
+            result = self.agent_coordinator.process_query(query, conversation)
+            return result
+        except Exception as e:
+            print(f"Error in analyze_jira_data: {str(e)}", flush=True)
+            return f"I encountered an error while analyzing the data: {str(e)}"
+    
     def process_message(self, user_message: str, conversation: list = None) -> str:
         """
         Process a user message using the configured LLM provider.
         This is the main method that replaces the OpenAI-specific implementation.
         """
+        # Store the original provider to restore it later if needed
+        original_provider = self.provider
+        
+        # Ensure user_message is not None
+        if user_message is None:
+            user_message = ""
+        
+        # If using Anthropic, use the direct API method to avoid LiteLLM formatting issues
+        if self.provider == "anthropic":
+            print(f"Using direct Anthropic API for message processing", flush=True)
+            return self.process_message_with_anthropic_direct(user_message, conversation)
+            
         messages = [{"role": "system", "content": self.training_instructions}]
         if conversation:
             messages.extend(conversation)
@@ -186,7 +275,9 @@ class LLMManager:
 
             # Handle potential differences in tool_calls format
             if hasattr(message, 'tool_calls') and message.tool_calls:
-                followup_messages = messages + [{"role": "assistant", "content": None, "tool_calls": message.tool_calls}]
+                # Always use empty string for content with Anthropic, None for other providers
+                content_value = "" if self.provider == "anthropic" else None
+                followup_messages = messages + [{"role": "assistant", "content": content_value, "tool_calls": message.tool_calls}]
                 all_data = {}
 
                 for tool_call in message.tool_calls:
@@ -203,19 +294,34 @@ class LLMManager:
                         for project_key in project_keys:
                             metrics = get_metrics(project_key, num_sprints)
                             all_data[project_key] = metrics
-                            
-
+                        
+                        followup_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(all_data)
+                        })
+                    
                     elif function_call.name == "get_initiative_summary":
                         initiative_key = arguments.get("initiative_key", "")
                         start_date = arguments.get("start_date", "")
                         end_date = arguments.get("end_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
                         all_data = self.fetch_initiative_summary(initiative_key, start_date, end_date)
-
-                    followup_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": json.dumps(all_data)
-                    })
+                        
+                        followup_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(all_data)
+                        })
+                    
+                    elif function_call.name == "analyze_jira_data":
+                        query = arguments.get("query", "")
+                        result = self.analyze_jira_data(query)
+                        
+                        followup_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"result": result})
+                        })
 
                 # Use LiteLLM for the followup call as well
                 followup = completion(
@@ -227,7 +333,8 @@ class LLMManager:
             elif hasattr(message, 'function_call') and message.function_call:  # For older OpenAI format
                 # Handle legacy function_call format
                 function_call = message.function_call
-                followup_messages = messages + [{"role": "assistant", "content": None, "function_call": function_call}]
+                content_value = "" if self.provider == "anthropic" else None
+                followup_messages = messages + [{"role": "assistant", "content": content_value, "function_call": function_call}]
                 all_data = {}
                 
                 try:
@@ -248,6 +355,11 @@ class LLMManager:
                     start_date = arguments.get("start_date", "")
                     end_date = arguments.get("end_date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))
                     all_data = self.fetch_initiative_summary(initiative_key, start_date, end_date)
+                
+                elif function_call.name == "analyze_jira_data":
+                    query = arguments.get("query", "")
+                    result = self.analyze_jira_data(query)
+                    all_data = {"result": result}
                 
                 followup_messages.append({
                     "role": "function",
@@ -287,6 +399,97 @@ class LLMManager:
                     self.model = self.get_model_string()
             
             return f"I encountered an error: {str(e)}"
+    
+    def process_message_with_anthropic_direct(self, user_message: str, conversation: list = None) -> str:
+        """
+        Process a user message using the Anthropic API directly.
+        This method bypasses LiteLLM to avoid any potential issues with message formatting.
+        
+        Args:
+            user_message: The user message to process
+            conversation: Optional conversation history
+            
+        Returns:
+            The response from the Anthropic API
+        """
+        # Ensure user_message is not None
+        if user_message is None:
+            user_message = ""
+        
+        # Get the Anthropic API key
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+        
+        # Create the Anthropic client
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Extract system message - Anthropic expects this as a separate parameter
+        system_content = self.training_instructions
+        
+        # Format the messages for Anthropic (only user and assistant messages)
+        formatted_messages = []
+        
+        # Add conversation history
+        if conversation:
+            for msg in conversation:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                
+                # Ensure content is not None
+                if content is None:
+                    content = ""
+                
+                # Map roles to Anthropic format
+                if role == "user":
+                    formatted_messages.append({
+                        "role": "user",
+                        "content": content
+                    })
+                elif role == "assistant":
+                    formatted_messages.append({
+                        "role": "assistant",
+                        "content": content
+                    })
+                elif role == "system":
+                    # For system messages in the conversation, we'll use the last one
+                    # as the system parameter (Anthropic only supports one system message)
+                    system_content = content
+        
+        # Add the user message
+        formatted_messages.append({
+            "role": "user",
+            "content": user_message
+        })
+        
+        try:
+            # Call the Anthropic API with system as a separate parameter
+            response = client.messages.create(
+                model=self.model_map.get("anthropic"),
+                system=system_content,  # System message as a separate parameter
+                messages=formatted_messages,  # Only user and assistant messages
+                max_tokens=4096
+            )
+            
+            return response.content[0].text
+        except Exception as e:
+            print(f"Anthropic API error: {str(e)}", flush=True)
+            
+            # Fall back to OpenAI if there's an error
+            print(f"Falling back to OpenAI due to Anthropic API error", flush=True)
+            original_provider = self.provider
+            self.provider = "openai"
+            self.model = self.get_model_string()
+            try:
+                result = self.process_message(user_message, conversation)
+                self.provider = original_provider  # Reset to original provider
+                self.model = self.get_model_string()
+                return result
+            except Exception as fallback_error:
+                print(f"Fallback also failed: {str(fallback_error)}", flush=True)
+                self.provider = original_provider  # Reset to original provider
+                self.model = self.get_model_string()
+                return f"I encountered an error: {str(e)}"
     
     def fetch_initiative_summary(self, initiative_key: str, start_date: str, end_date: str) -> dict:
         """
