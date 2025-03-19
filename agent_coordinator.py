@@ -131,12 +131,13 @@ class AgentCoordinator:
             for key in sorted_keys[:len(self.query_cache) - self.max_cache_size]:
                 del self.query_cache[key]
     
-    def process_query(self, query: str) -> str:
+    def process_query(self, query: str, conversation: list = None) -> str:
         """
         Process a complex analytics query.
         
         Args:
             query: The natural language query
+            conversation: Optional conversation history
             
         Returns:
             The analysis results as a string

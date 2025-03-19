@@ -204,12 +204,13 @@ class LLMManager:
         self.model = self.get_model_string()
         return True
     
-    def analyze_jira_data(self, query: str) -> str:
+    def analyze_jira_data(self, query: str, conversation: list = None) -> str:
         """
         Process all queries using the agent-based architecture.
         
         Args:
             query: The query in natural language
+            conversation: Optional conversation history
             
         Returns:
             The analysis results as a string
@@ -229,10 +230,10 @@ class LLMManager:
                     f"Query: {query}\n\n"
                     f"The current date is {datetime.now(timezone.utc).strftime('%Y-%m-%d')}.\n"
                 )
-                return self.process_message_with_anthropic_direct(analytics_prompt)
+                return self.process_message_with_anthropic_direct(analytics_prompt, conversation)
             
             # Use the agent-based architecture for all queries
-            result = self.agent_coordinator.process_query(query)
+            result = self.agent_coordinator.process_query(query, conversation)
             return result
         except Exception as e:
             print(f"Error in analyze_jira_data: {str(e)}", flush=True)

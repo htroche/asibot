@@ -952,13 +952,13 @@ def get_story_points(issue: Dict[str, Any]) -> Optional[float]:
 
     def _clean_code_response(self, response_text: str) -> str:
         """
-        Clean up any potential markdown code block formatting in the response.
+        Clean up any potential markdown code block formatting and extraneous characters in the response.
         
         Args:
             response_text: The response text from the LLM
             
         Returns:
-            Cleaned code with no markdown formatting
+            Cleaned code with no markdown formatting or extraneous characters
         """
         # Remove markdown code block markers if present
         if response_text.startswith("```python"):
@@ -968,7 +968,71 @@ def get_story_points(issue: Dict[str, Any]) -> Optional[float]:
             
         if response_text.endswith("```"):
             response_text = response_text[:-len("```")].strip()
-            
+        
+        # Remove any leading or trailing whitespace
+        response_text = response_text.strip()
+        
+        # Remove any leading or trailing comments that might be explanations
+        lines = response_text.split('\n')
+        
+        # Remove leading comments
+        while lines and (lines[0].strip().startswith('#') or lines[0].strip() == ''):
+            if lines[0].strip() == '':
+                lines.pop(0)
+            elif lines[0].strip().startswith('# ') and len(lines[0].strip()) > 2 and not lines[0].strip().startswith('#!/'):
+                lines.pop(0)
+            else:
+                break
+        
+        # Remove trailing comments
+        while lines and (lines[-1].strip().startswith('#') or lines[-1].strip() == ''):
+            if lines[-1].strip() == '':
+                lines.pop()
+            elif lines[-1].strip().startswith('# ') and len(lines[-1].strip()) > 2:
+                lines.pop()
+            else:
+                break
+        
+        # Check if there are any non-Python lines at the beginning or end
+        # (e.g., "Here's the code:" or "Let me know if you need any clarification.")
+        if lines and not (lines[0].strip().startswith('import') or 
+                          lines[0].strip().startswith('from') or 
+                          lines[0].strip().startswith('#') or 
+                          lines[0].strip().startswith('def ') or 
+                          lines[0].strip().startswith('class ') or 
+                          lines[0].strip() == ''):
+            lines.pop(0)
+        
+        if lines and not (lines[-1].strip().endswith(')') or 
+                          lines[-1].strip().endswith('}') or 
+                          lines[-1].strip().endswith(']') or 
+                          lines[-1].strip().endswith('"""') or 
+                          lines[-1].strip().endswith("'''") or 
+                          lines[-1].strip().startswith('def ') or 
+                          lines[-1].strip().startswith('class ') or 
+                          lines[-1].strip() == ''):
+            lines.pop()
+        
+        # Rejoin the lines
+        response_text = '\n'.join(lines)
+        
+        # Ensure the code starts with proper imports or comments
+        if not (response_text.strip().startswith('import') or 
+                response_text.strip().startswith('from') or 
+                response_text.strip().startswith('#') or 
+                response_text.strip().startswith('def ') or 
+                response_text.strip().startswith('class ')):
+            # If not, try to find the first valid Python line
+            lines = response_text.split('\n')
+            for i, line in enumerate(lines):
+                if (line.strip().startswith('import') or 
+                    line.strip().startswith('from') or 
+                    line.strip().startswith('#') or 
+                    line.strip().startswith('def ') or 
+                    line.strip().startswith('class ')):
+                    response_text = '\n'.join(lines[i:])
+                    break
+        
         return response_text
     
     def _get_story_point_completion_time_template(self) -> str:
